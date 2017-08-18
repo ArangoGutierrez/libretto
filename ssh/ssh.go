@@ -90,8 +90,9 @@ type SSHClient struct {
 	Port    int
 	Options Options
 
-	cryptoClient *cssh.Client
-	close        chan bool
+	cryptoClientMu sync.Mutex
+	cryptoClient   *cssh.Client
+	close          chan bool
 }
 
 // Connect connects to a machine using SSH.
@@ -135,7 +136,9 @@ func (client *SSHClient) Connect() error {
 		return err
 	}
 
+	client.cryptoClientMu.Lock()
 	client.cryptoClient = c
+	client.cryptoClientMu.Unlock()
 
 	client.close = make(chan bool, 1)
 
@@ -152,7 +155,9 @@ func (client *SSHClient) keepAlive() {
 		select {
 		case <-t.C:
 			// send a keep alive request on the underlying channel
+			client.cryptoClientMu.Lock()
 			client.cryptoClient.Conn.SendRequest("libretto-ssh", true, nil)
+			client.cryptoClientMu.Unlock()
 		case <-client.close:
 			// client is disconnecting, close it
 			return
@@ -169,7 +174,9 @@ func (client *SSHClient) Disconnect() {
 func (client *SSHClient) Download(dst io.WriteCloser, remotePath string) error {
 	defer dst.Close()
 
+	client.cryptoClientMu.Lock()
 	session, err := client.cryptoClient.NewSession()
+	client.cryptoClientMu.Lock()
 	if err != nil {
 		return err
 	}
@@ -263,7 +270,9 @@ func (client *SSHClient) Download(dst io.WriteCloser, remotePath string) error {
 
 // Run runs a command via SSH.
 func (client *SSHClient) Run(command string, stdout io.Writer, stderr io.Writer) error {
+	client.cryptoClientMu.Lock()
 	session, err := client.cryptoClient.NewSession()
+	client.cryptoClientMu.Unlock()
 	if err != nil {
 		return err
 	}
@@ -292,7 +301,9 @@ func (client *SSHClient) Run(command string, stdout io.Writer, stderr io.Writer)
 // file on the remote machine. size is the number of bytes to be uploaded. mode
 // is the permissions the file should have, e.g. 0744.
 func (client *SSHClient) Upload(src io.Reader, dst string, size int, mode uint32) error {
+	client.cryptoClientMu.Lock()
 	session, err := client.cryptoClient.NewSession()
+	client.cryptoClientMu.Lock()
 	if err != nil {
 		return err
 	}
